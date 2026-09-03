@@ -1,0 +1,72 @@
+name: Deploy documentation preview
+on:
+  workflow_run:
+    workflows: [Tests And Linting]
+    types: [completed]
+
+jobs:
+  deploy:
+    timeout-minutes: 20
+    if: ${{ github.event.workflow_run.conclusion == 'success' &&  github.event.workflow_run.event == 'pull_request' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Download artifact
+        uses: dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11 # v6
+        with:
+          workflow_conclusion: success
+          run_id: ${{ github.event.workflow_run.id }}
+          path: docs-preview
+          name: docs-preview
+
+      - name: Set PR number
+        run: echo "PR_NUMBER=$(cat docs-preview/.pr_number)" >> $GITHUB_ENV
+
+      - name: Deploy docs preview
+        uses: JamesIves/github-pages-deploy-action@94f3c658273cf92fb48ef99e5fbc02bd2dc642b2 # v4
+        with:
+          folder: docs-preview/docs/_build/html
+          token: ${{ secrets.DOCS_PREVIEW_DEPLOY_TOKEN }}
+          repository-name: litestar-org/litestar-docs-preview
+          clean: false
+          target-folder: ${{ env.PR_NUMBER }}
+          branch: gh-pages
+
+      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          PR_NUMBER: ${{ env.PR_NUMBER }}
+        with:
+          script: |
+            const issue_number = process.env.PR_NUMBER
+            const body = "Documentation preview will be available shortly at https://litestar-org.github.io/litestar-docs-preview/" + issue_number
+
+            const opts = github.rest.issues.listComments.endpoint.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue_number,
+            });
+
+            const comments = await github.paginate(opts)
+
+            for (const comment of comments) {
+              if (comment.user.id === 41898282 && comment.body === body) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id
+                })
+              }
+            }
+
+            await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue_number,
+                  body: body,
+            })

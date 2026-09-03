@@ -1,0 +1,42 @@
+name: Latest Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+
+  publish-release:
+    timeout-minutes: 20
+    name: upload release to PyPI
+    runs-on: ubuntu-22.04
+    permissions:
+      id-token: write
+    environment: release
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f # v5
+        with:
+          python-version: "3.12"
+
+      - uses: pdm-project/setup-pdm@568ddd69406b30de1774ec0044b73ae06e716aa4 # v4
+        name: Set up PDM
+        with:
+          python-version: "3.12"
+          cache: true
+
+      - name: Build package
+        run: pdm build
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@fb9fc6a4e67ca27a7a76b17bbf90be83c2d3c716 # release/v1
+
+  notify-issues:
+    needs: publish-release
+    name: Notify issues
+    uses: ./.github/workflows/notify-released-issues.yml
+    with:
+      release_tag: ${{ github.event.release.tag_name }}

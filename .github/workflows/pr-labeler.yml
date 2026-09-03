@@ -1,0 +1,51 @@
+name: "Pull Request Labeler"
+
+on:
+  pull_request_target:
+
+jobs:
+  apply-labels:
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+      statuses: write
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: fuxingloh/multi-labeler@b15a54460c38f54043fa75f7b08a0e2aa5b94b5b # v4
+      with:
+        github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+  distinguish-pr-origin:
+    timeout-minutes: 20
+    needs: apply-labels
+    if: ${{ always() }}
+    permissions:
+      pull-requests: write
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const maintainers = [
+              'JacobCoffee', 'provinzkraut', 'cofin',
+              'peterschutt', 'Alc-Alc', 'guacs',
+              'dependabot[bot]', 'all-contributors[bot]'
+            ]
+            if (maintainers.includes(context.payload.sender.login)) {
+              github.rest.issues.addLabels({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['pr/internal']
+              })
+            } else {
+              github.rest.issues.addLabels({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['pr/external', 'Triage Required :hospital:']
+              })
+            }
