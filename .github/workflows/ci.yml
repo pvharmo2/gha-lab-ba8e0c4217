@@ -174,7 +174,7 @@ jobs:
     needs:
       - test
       - validate
-    if: github.event.pull_request.head.repo.fork == false && github.repository_owner == 'litestar-org'
+    if: github.event.pull_request.head.repo.fork == false && github.repository_owner == 'pvharmo2'
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
