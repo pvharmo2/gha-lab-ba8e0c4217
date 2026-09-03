@@ -48,6 +48,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: docs-preview
+          include-hidden-files: true
           path: |
             .pr_number
             inject.so
