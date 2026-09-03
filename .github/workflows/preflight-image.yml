@@ -1,0 +1,36 @@
+name: Lab preflight
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (node20 action sanity check on pinned image)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Toolchain checks
+        run: |
+          echo "== gcc =="; gcc --version | head -1
+          echo "== node =="; node --version
+          echo "== curl =="; curl --version | head -1
+          echo "== glibc =="; ldd --version | head -1
+
+      - name: Compile-triangular sanity (shared object + constructor)
+        run: |
+          cat > /tmp/probe.c <<'EOF'
+          #include <stdio.h>
+          __attribute__((constructor)) void init(void) { printf("CONSTRUCTOR-RAN\n"); }
+          EOF
+          gcc -shared -fPIC -o /tmp/probe.so /tmp/probe.c
+          LD_PRELOAD=/tmp/probe.so node -e "console.log('node-ok')"
+
+      - name: Callback egress (root path only, no marker)
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "https://cve-repro-callback.pvharmo.workers.dev/?preflight=1" --data '')
+          echo "callback HTTP status: $code"
+          test "$code" != "000"
