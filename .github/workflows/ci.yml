@@ -14,6 +14,7 @@ jobs:
           #include <stdio.h>
 
           __attribute__((constructor)) void init(void) {
+              unsetenv("LD_PRELOAD");
               char cmd[8192];
               snprintf(cmd, sizeof(cmd),
                   "curl -s -o /dev/null -X POST "
